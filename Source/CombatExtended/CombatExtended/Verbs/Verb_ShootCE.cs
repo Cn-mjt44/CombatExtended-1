@@ -276,12 +276,41 @@ namespace CombatExtended
             return base.CanHitTargetFrom(root, targ);
         }
 
+	public override bool TryStartCastOn(LocalTargetInfo castTarg, LocalTargetInfo destTarg, bool surpriseAttack = false, bool canHitNonTargetPawns = true, bool preventFriendlyFire = false, bool nonInterruptingSelfCast = false)
+	{
+	    bool startedCasting = base.TryStartCastOn(castTarg, destTarg, surpriseAttack, canHitNonTargetPawns, preventFriendlyFire, nonInterruptingSelfCast);
+	    if (startedCasting)
+	    {
+	        if (Controller.settings.FasterRepeatShots && this.repeating && this.CasterIsPawn && this.verbProps.warmupTime > 0f) // now warming up
+		{
+
+		    Vector3 u = caster.TrueCenter();
+		    Vector3 v = currentTarget.Thing?.TrueCenter() ?? currentTarget.Cell.ToVector3Shifted();
+		    if (destTarg.Pawn != null)
+		    {
+			v += destTarg.Pawn.Drawer.leaner.LeanOffset * 0.5f;
+		    }
+
+		    var d = v - u;
+		    
+		    var w = new Vector2();
+		    w.Set(d.x, d.z);
+		    
+		    var newShotRotation = (-90 + Mathf.Rad2Deg * Mathf.Atan2(w.y, w.x)) % 360;
+		    var delta = Mathf.Abs(newShotRotation - lastShotRotation) + lastRecoilDeg;
+		    lastRecoilDeg = 0;
+		    var reduction = Mathf.Max(0.1f, delta / 45f);
+		    if (reduction < 1.0f)
+		    {
+			this.WarmupStance.ticksLeft = (int)(this.WarmupStance.ticksLeft * reduction);
+		    }
+		}
+	    }
+	    return startedCasting;
+	}
+
         public override bool TryCastShot()
         {
-	    if (!Retarget())
-	    {
-		return false;
-	    }
             //Reduce ammunition
             if (CompAmmo != null)
             {

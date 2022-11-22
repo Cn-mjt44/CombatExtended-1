@@ -55,6 +55,14 @@ namespace CombatExtended
 	private LocalTargetInfo lastTarget = null;
 	private IntVec3 lastTargetPos = IntVec3.Invalid;
 
+	protected float lastShotAngle;
+	protected float lastShotRotation;
+	protected float lastRecoilDeg;
+	protected ShootLine lastShootLine;
+	protected bool repeating = false;
+
+	private bool doRetarget = true;
+
         #endregion
 
         #region Properties
@@ -233,6 +241,30 @@ namespace CombatExtended
         #endregion
 
         #region Methods
+
+	public override void Reset()
+	{
+	    base.Reset();
+	    shootingAtDowned = false;
+	    lastTarget = null;
+	    lastTargetPos = IntVec3.Invalid;
+
+	    repeating = false;
+
+	}
+
+	public override void ExposeData() {
+	    base.ExposeData();
+	    Scribe_Values.Look<bool>(ref this.shootingAtDowned, "shootingAtDowned", false, false);
+	    Scribe_TargetInfo.Look(ref this.lastTarget, "lastTarget");
+	    Scribe_Values.Look<IntVec3>(ref this.lastTargetPos, "lastTargetPos", IntVec3.Invalid, false);
+	    Scribe_Values.Look<bool>(ref this.repeating, "repeating", false, false);
+	    Scribe_Values.Look<float>(ref this.lastShotAngle, "lastShotAngle", 0f, false);
+	    Scribe_Values.Look<float>(ref this.lastShotRotation, "lastShotRotation", 0f, false);
+	    Scribe_Values.Look<float>(ref this.lastRecoilDeg, "lastRecoilDeg", 0f, false);
+
+	}
+	
 
         public override bool Available()
         {
@@ -538,7 +570,9 @@ namespace CombatExtended
             float recoilMagnitude = numShotsFired == 0 ? 0 : Mathf.Pow((5 - ShootingAccuracy), (Mathf.Min(10, numShotsFired) / 6.25f));
 
             rotation += recoilMagnitude * Rand.Range(minX, maxX);
-            angle += Mathf.Deg2Rad * recoilMagnitude * Rand.Range(minY, maxY);
+	    var trd = recoilMagnitude * Rand.Range(minY, maxY);
+            angle += Mathf.Deg2Rad * trd;
+	    lastRecoilDeg += trd;
         }
 
         /// <summary>
@@ -786,6 +820,11 @@ namespace CombatExtended
 
 	protected bool Retarget()
 	{
+	    if (!doRetarget)
+	    {
+		return true;
+	    }
+	    doRetarget = false;
 	    if (currentTarget != lastTarget)
 	    {
 		lastTarget = currentTarget;
@@ -837,9 +876,18 @@ namespace CombatExtended
         /// <returns>True for successful shot, false otherwise</returns>
         public override bool TryCastShot()
         {
-            if (!TryFindCEShootLineFromTo(caster.Position, currentTarget, out var shootLine))
+	    Retarget();
+	    repeating = true;
+	    doRetarget = true;
+	    bool firingWithoutTarget = false;
+            if (!TryFindCEShootLineFromTo(caster.Position, currentTarget, out var shootLine)) // If we are mid burst, keep shooting.
             {
-                return false;
+		if (numShotsFired == 0)
+		{
+		    return false;
+		}
+		shootLine = lastShootLine;
+		firingWithoutTarget = true;
             }
             if (projectilePropsCE.pelletCount < 1)
             {
@@ -875,7 +923,17 @@ namespace CombatExtended
                 projectile.intendedTarget = currentTarget;
                 projectile.mount = caster.Position.GetThingList(caster.Map).FirstOrDefault(t => t is Pawn && t != caster);
                 projectile.AccuracyFactor = report.accuracyFactor * report.swayDegrees * ((numShotsFired + 1) * 0.75f);
+		if (firingWithoutTarget)
+		{
+		    shotAngle = lastShotAngle;
+		    shotRotation = lastShotRotation;
+		    GetSwayVec(ref shotRotation, ref shotAngle);
+		    GetRecoilVec(ref shotRotation, ref shotAngle);
 
+		}
+		this.lastShotAngle = shotAngle;
+		this.lastShotRotation = shotRotation;
+		this.lastShootLine = shootLine;
                 if (instant)
                 {
                     var shotHeight = ShotHeight;
